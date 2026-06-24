@@ -1,0 +1,29 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.server
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../../.env
+    environment:
+      - SERVER_ADDR=:8080
+      - LOG_LEVEL=info
+    networks:
+      - t2-network
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.web
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - t2-network
+
+networks:
+  t2-network:
+    driver: bridge

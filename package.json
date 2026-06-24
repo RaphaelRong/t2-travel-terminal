@@ -1,0 +1,19 @@
+{
+  "name": "t2-travel-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source intelligence terminal and ecosystem for the global hotel and travel industry",
+  "scripts": {
+    "dev": "make dev",
+    "build": "make build && cd apps/web && npm run build",
+    "test": "go test ./... && cd apps/web && npm run test",
+    "lint": "golangci-lint run ./... && cd apps/web && npm run lint"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=20",
+    "go": ">=1.23"
+  }
+}

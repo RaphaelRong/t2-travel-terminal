@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --color-base: 255 255 255;
+  --color-surface: 250 250 250;
+  --color-raised: 243 244 246;
+  --color-highlight: 235 236 240;
+  --color-border-dim: 229 231 235;
+  --color-border-med: 209 213 219;
+  --color-border-bright: 156 163 175;
+  --color-text-primary: 17 24 39;
+  --color-text-secondary: 75 85 99;
+  --color-text-tertiary: 107 114 128;
+  --color-text-dim: 156 163 175;
+  --color-accent: 217 119 6;
+  --color-accent-dim: 146 64 14;
+  --color-positive: 22 163 74;
+  --color-positive-dim: 20 83 45;
+  --color-negative: 220 38 38;
+  --color-negative-dim: 127 29 29;
+  --color-warning: 202 138 4;
+  --color-info: 37 99 235;
+  --color-cyan: 8 145 178;
+}
+
+.dark {
+  --color-base: 8 8 8;
+  --color-surface: 10 10 10;
+  --color-raised: 17 17 17;
+  --color-highlight: 22 22 22;
+  --color-border-dim: 26 26 26;
+  --color-border-med: 34 34 34;
+  --color-border-bright: 51 51 51;
+  --color-text-primary: 229 229 229;
+  --color-text-secondary: 128 128 128;
+  --color-text-tertiary: 82 82 82;
+  --color-text-dim: 64 64 64;
+  --color-accent: 217 119 6;
+  --color-accent-dim: 120 53 15;
+  --color-positive: 22 163 74;
+  --color-positive-dim: 20 83 45;
+  --color-negative: 220 38 38;
+  --color-negative-dim: 127 29 29;
+  --color-warning: 202 138 4;
+  --color-info: 37 99 235;
+  --color-cyan: 8 145 178;
+}
+
+html {
+  background-color: rgb(var(--color-base));
+  color: rgb(var(--color-text-primary));
+}
+
+body {
+  margin: 0;
+  font-family: "SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Source Code Pro", "Courier New", monospace;
+  background-color: rgb(var(--color-base));
+  color: rgb(var(--color-text-primary));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: rgb(var(--color-accent));
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(var(--color-surface));
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-border-bright));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-text-tertiary));
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--color-text-tertiary));
+}

@@ -1,0 +1,49 @@
+name: Deploy to GCP VM
+
+on:
+  push:
+    branches: [main]
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Deploy to GCP VM via SSH
+        uses: appleboy/ssh-action@v1.2.4
+        with:
+          host: ${{ secrets.GCP_VM_HOST }}
+          username: ${{ secrets.GCP_VM_USER }}
+          key: ${{ secrets.GCP_VM_SSH_KEY }}
+          script: |
+            set -e
+            echo "Ensuring dependencies are installed..."
+            sudo apt-get update
+            sudo apt-get install -y git docker.io docker-compose-plugin
+            sudo usermod -aG docker "$USER" || true
+
+            echo "Deploying latest code..."
+            PROJECT_DIR=~/t2-travel-terminal
+            if [ ! -d "$PROJECT_DIR" ]; then
+              git clone ${{ github.server_url }}/${{ github.repository }}.git "$PROJECT_DIR"
+            fi
+
+            cd "$PROJECT_DIR"
+            git fetch origin
+            git reset --hard origin/main
+
+            echo "Pulling latest images and restarting services..."
+            docker compose -f deployments/docker/docker-compose.yml pull
+            docker compose -f deployments/docker/docker-compose.yml up --build -d
+
+            echo "Cleaning up old images..."
+            docker system prune -f
+
+            echo "Deployment complete."
