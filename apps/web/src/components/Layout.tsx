@@ -6,7 +6,7 @@ const baseNavItems = [
   { to: '/', label: 'Globe' },
   { to: '/playground', label: 'Playground' },
   { to: '/projects', label: 'Projects' },
-  { to: '/members', label: 'Members' },
+  // { to: '/members', label: 'Members' },
   { to: '/plans', label: 'Plans' },
   { to: '/profile', label: 'Profile' },
 ]
