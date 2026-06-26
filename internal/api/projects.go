@@ -203,17 +203,6 @@ func listProjectCapabilities(c *gin.Context, tx pgx.Tx, projectID uuid.UUID) ([]
 	return result, rows.Err()
 }
 
-func hydrateProjectCapabilities(c *gin.Context, tx pgx.Tx, projects []projectResp) error {
-	for i := range projects {
-		capabilities, err := listProjectCapabilities(c, tx, projects[i].ID)
-		if err != nil {
-			return err
-		}
-		projects[i].Capabilities = capabilities
-	}
-	return nil
-}
-
 func listProjectIntegrations(c *gin.Context, tx pgx.Tx, projectID uuid.UUID) ([]projectIntegrationResp, error) {
 	rows, err := tx.Query(c.Request.Context(), queries.ProjectIntegrationsList, projectID)
 	if err != nil {
@@ -246,25 +235,6 @@ func hydrateProjectDetails(c *gin.Context, tx pgx.Tx, projects []projectResp) er
 		projects[i].Capabilities = capabilities
 	}
 	return nil
-}
-
-func scanProjectCapability(row pgx.Row) (projectCapabilityResp, error) {
-	var cap projectCapabilityResp
-	err := row.Scan(
-		&cap.ID, &cap.ProjectID, &cap.Kind, &cap.Name, &cap.Description, &cap.Status,
-		&cap.IntegrationID, &cap.RequestMethod, &cap.RequestPath, &cap.InputSchema, &cap.OutputSchema, &cap.Metadata,
-		&cap.CreatedAt, &cap.UpdatedAt,
-	)
-	if len(cap.InputSchema) == 0 {
-		cap.InputSchema = json.RawMessage(`{}`)
-	}
-	if len(cap.OutputSchema) == 0 {
-		cap.OutputSchema = json.RawMessage(`{}`)
-	}
-	if len(cap.Metadata) == 0 {
-		cap.Metadata = json.RawMessage(`{}`)
-	}
-	return cap, err
 }
 
 func scanProjectIntegration(row pgx.Row) (projectIntegrationResp, error) {
@@ -817,7 +787,7 @@ func fetchMCPTools(c *gin.Context, project projectResp, integration projectInteg
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
@@ -860,7 +830,7 @@ func syncAPIIntegration(c *gin.Context, project projectResp, integration project
 func syncSkillIntegration(c *gin.Context, project projectResp, integration projectIntegrationResp) ([]syncedCapability, error) {
 	docURL := integrationURL(integration.DocumentationURL, integration.EndpointURL)
 	if docURL == "" {
-		return nil, fmt.Errorf("Skill documentation_url is required")
+		return nil, fmt.Errorf("skill documentation_url is required")
 	}
 
 	doc, err := fetchSkillDocument(c, project, integration, docURL)
@@ -982,7 +952,7 @@ func fetchStructuredDocument(c *gin.Context, project projectResp, integration pr
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {

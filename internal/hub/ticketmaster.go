@@ -92,7 +92,7 @@ func (c *TicketmasterClient) SearchEventsWithAPIKey(ctx context.Context, req Tic
 	}
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
-		return result, fmt.Errorf("Ticketmaster provider is not configured")
+		return result, fmt.Errorf("ticketmaster provider is not configured")
 	}
 
 	startDate, endDate, err := resolveDateRange(req.StartDate, req.EndDate, req.Days)
@@ -113,10 +113,7 @@ func (c *TicketmasterClient) SearchEventsWithAPIKey(ctx context.Context, req Tic
 	result.Metadata.FetchedAt = time.Now().UTC().Format(time.RFC3339)
 
 	page := 0
-	for {
-		if page*limit >= 1000 {
-			break
-		}
+	for page*limit < 1000 {
 
 		params := url.Values{}
 		params.Set("apikey", apiKey)
@@ -147,7 +144,7 @@ func (c *TicketmasterClient) SearchEventsWithAPIKey(ctx context.Context, req Tic
 			return result, err
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			return result, readErr
 		}
@@ -155,7 +152,7 @@ func (c *TicketmasterClient) SearchEventsWithAPIKey(ctx context.Context, req Tic
 			if isPagingDepthError(body) {
 				break
 			}
-			return result, fmt.Errorf("Ticketmaster API returned HTTP %d: %s", resp.StatusCode, string(body))
+			return result, fmt.Errorf("ticketmaster API returned HTTP %d: %s", resp.StatusCode, string(body))
 		}
 
 		var decoded ticketmasterResponse
