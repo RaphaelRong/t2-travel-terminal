@@ -722,7 +722,7 @@ func syncIntegrationCapabilities(c *gin.Context, project projectResp, integratio
 
 func syncMCPIntegration(c *gin.Context, project projectResp, integration projectIntegrationResp) ([]syncedCapability, error) {
 	if integration.EndpointURL == nil || strings.TrimSpace(*integration.EndpointURL) == "" {
-		return nil, fmt.Errorf("MCP endpoint_url is required")
+		return nil, fmt.Errorf("mcp endpoint_url is required")
 	}
 
 	tools, err := fetchMCPTools(c, project, integration)
@@ -794,7 +794,7 @@ func fetchMCPTools(c *gin.Context, project projectResp, integration projectInteg
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("MCP tools/list returned HTTP %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("mcp tools/list returned HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var decoded mcpToolsListResponse
@@ -802,7 +802,7 @@ func fetchMCPTools(c *gin.Context, project projectResp, integration projectInteg
 		return nil, err
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("MCP tools/list error %d: %s", decoded.Error.Code, decoded.Error.Message)
+		return nil, fmt.Errorf("mcp tools/list error %d: %s", decoded.Error.Code, decoded.Error.Message)
 	}
 	return decoded.Result.Tools, nil
 }
@@ -810,7 +810,7 @@ func fetchMCPTools(c *gin.Context, project projectResp, integration projectInteg
 func syncAPIIntegration(c *gin.Context, project projectResp, integration projectIntegrationResp) ([]syncedCapability, error) {
 	docURL := integrationURL(integration.DocumentationURL, integration.EndpointURL)
 	if docURL == "" {
-		return nil, fmt.Errorf("API documentation_url is required")
+		return nil, fmt.Errorf("api documentation_url is required")
 	}
 
 	doc, err := fetchStructuredDocument(c, project, integration, docURL)
@@ -990,7 +990,7 @@ func decodeStructuredDocument(body []byte) (map[string]any, error) {
 func capabilitiesFromOpenAPI3(doc map[string]any) ([]syncedCapability, error) {
 	paths := getMap(doc, "paths")
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("OpenAPI document has no paths")
+		return nil, fmt.Errorf("openapi document has no paths")
 	}
 
 	result := []syncedCapability{}
@@ -1027,7 +1027,7 @@ func capabilitiesFromOpenAPI3(doc map[string]any) ([]syncedCapability, error) {
 		}
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("OpenAPI document did not contain operations")
+		return nil, fmt.Errorf("openapi document did not contain operations")
 	}
 	return result, nil
 }
@@ -1035,7 +1035,7 @@ func capabilitiesFromOpenAPI3(doc map[string]any) ([]syncedCapability, error) {
 func capabilitiesFromSwagger2(doc map[string]any) ([]syncedCapability, error) {
 	paths := getMap(doc, "paths")
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("Swagger document has no paths")
+		return nil, fmt.Errorf("swagger document has no paths")
 	}
 
 	basePath := getString(doc, "basePath")
@@ -1075,7 +1075,7 @@ func capabilitiesFromSwagger2(doc map[string]any) ([]syncedCapability, error) {
 		}
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("Swagger document did not contain operations")
+		return nil, fmt.Errorf("swagger document did not contain operations")
 	}
 	return result, nil
 }
