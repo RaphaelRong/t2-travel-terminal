@@ -61,8 +61,6 @@ High-level stack:
 
 ## 🛠️ Getting Started
 
-> This project is in early development. The instructions below will be updated as the first MVP is released.
-
 ### Tech Stack
 
 - **Backend**: Go 1.23+ (Gin, Viper, Zap)
@@ -135,7 +133,7 @@ See [LICENSE](./LICENSE) for the full text.
 
 - [Discussions](https://github.com/t2-travel-terminal/t2-travel-terminal/discussions)
 - [Issues](https://github.com/t2-travel-terminal/t2-travel-terminal/issues)
-- [Twitter / X](https://x.com/T2TravelTerminal) *(placeholder)*
+- [Twitter / X](https://x.com/T2TravelTerminal)
 
 ---
 

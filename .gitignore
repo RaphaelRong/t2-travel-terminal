@@ -14,6 +14,13 @@ out/
 .cache/
 *.tsbuildinfo
 
+# Vite cache
+apps/web/.vite/
+
+# Compiled binaries
+bin/
+server
+
 # Environment variables
 .env
 .env.local
@@ -54,6 +61,13 @@ temp/
 
 # AI / session memory files
 memory/
+AGENTS.md
+
+# Outputs
+outputs/
+
+# Temporary / generated files
+LU-l.$,
 
 # OS files
 Thumbs.db

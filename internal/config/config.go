@@ -19,6 +19,20 @@ type Config struct {
 	DatabasePassword               string `mapstructure:"database_password"`
 	DatabaseName                   string `mapstructure:"database_name"`
 	JWTSecret                      string `mapstructure:"jwt_secret"`
+
+	// SMTP / Email configuration
+	SMTPHost                 string `mapstructure:"smtp_host"`
+	SMTPPort                 int    `mapstructure:"smtp_port"`
+	SMTPUsername             string `mapstructure:"smtp_username"`
+	SMTPPassword             string `mapstructure:"smtp_password"`
+	SMTPFrom                 string `mapstructure:"smtp_from"`
+	SMTPFromName             string `mapstructure:"smtp_from_name"`
+	SMTPInsecure             bool   `mapstructure:"smtp_insecure"`
+	SMTPAuthMethod           string `mapstructure:"smtp_auth_method"`
+	EmailVerificationBaseURL string `mapstructure:"email_verification_base_url"`
+
+	// Third-party hub providers
+	TicketmasterAPIKey string `mapstructure:"ticketmaster_api_key"`
 }
 
 // Load reads configuration from .env file (if present) and environment variables.
@@ -34,6 +48,16 @@ func Load() (*Config, error) {
 	v.SetDefault("database_password", "")
 	v.SetDefault("database_name", "postgres")
 	v.SetDefault("jwt_secret", "")
+	v.SetDefault("smtp_host", "smtp.gmail.com")
+	v.SetDefault("smtp_port", 587)
+	v.SetDefault("smtp_username", "")
+	v.SetDefault("smtp_password", "")
+	v.SetDefault("smtp_from", "")
+	v.SetDefault("smtp_from_name", "T2 Travel Terminal")
+	v.SetDefault("smtp_insecure", false)
+	v.SetDefault("smtp_auth_method", "LOGIN")
+	v.SetDefault("email_verification_base_url", "")
+	v.SetDefault("ticketmaster_api_key", "")
 	v.AutomaticEnv()
 
 	var cfg Config

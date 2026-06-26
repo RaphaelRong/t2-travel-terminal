@@ -1,24 +1,46 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/rbac"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/tenant"
 )
+
+type subscriptionPricing struct {
+	ID             uuid.UUID `json:"id"`
+	DurationMonths int       `json:"duration_months"`
+	Price          float64   `json:"price"`
+	Currency       string    `json:"currency"`
+}
+
+type subscriptionResp struct {
+	ID            uuid.UUID            `json:"id"`
+	Name          string               `json:"name"`
+	Slug          *string              `json:"slug,omitempty"`
+	PlanID        *uuid.UUID           `json:"plan_id,omitempty"`
+	PlanName      string               `json:"plan_name"`
+	EffectiveRole rbac.Role            `json:"effective_role"`
+	Pricing       *subscriptionPricing `json:"pricing,omitempty"`
+	Role          string               `json:"role"`
+	SubscribedAt  *time.Time           `json:"subscribed_at,omitempty"`
+	ExpiresAt     *time.Time           `json:"expires_at,omitempty"`
+	AutoRenew     bool                 `json:"auto_renew"`
+	Status        string               `json:"status"`
+}
 
 func listTenantsHandler(c *gin.Context) {
 	conn := tenant.ConnFromContext(c)
 	userID := tenant.UserIDFromContext(c)
+	ctx := c.Request.Context()
 
-	rows, err := conn.Query(c.Request.Context(),
-		`SELECT t.id, t.name, t.slug, t.plan_id, m.role
-		 FROM tenants t
-		 JOIN memberships m ON t.id = m.tenant_id
-		 WHERE m.user_id = $1
-		 ORDER BY t.name`,
+	rows, err := conn.Query(ctx,
+		queries.TenantListSubscriptions,
 		userID,
 	)
 	if err != nil {
@@ -27,67 +49,181 @@ func listTenantsHandler(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	type tenantResp struct {
-		ID     uuid.UUID `json:"id"`
-		Name   string    `json:"name"`
-		Slug   *string   `json:"slug,omitempty"`
-		PlanID string    `json:"plan_id"`
-		Role   string    `json:"role"`
-	}
-	var result []tenantResp
+	var result []subscriptionResp
 	for rows.Next() {
-		var t tenantResp
-		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.PlanID, &t.Role); err != nil {
+		var s subscriptionResp
+		var planID *uuid.UUID
+		var planName *string
+		var planRoleKey *string
+		var pricingID *uuid.UUID
+		var durationMonths *int
+		var price *float64
+		var currency *string
+		var subscribedAt *time.Time
+		var expiresAt *time.Time
+
+		if err := rows.Scan(
+			&s.ID, &s.Name, &s.Slug, &s.Status,
+			&subscribedAt, &expiresAt, &s.AutoRenew,
+			&planID, &planName, &planRoleKey,
+			&pricingID, &durationMonths, &price, &currency,
+			&s.Role,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		result = append(result, t)
+
+		if planID != nil {
+			s.PlanID = planID
+		}
+		if planName != nil {
+			s.PlanName = *planName
+		}
+		if planRoleKey != nil && *planRoleKey != "" {
+			s.EffectiveRole = rbac.RoleKeyToRole(*planRoleKey)
+		} else if planName != nil {
+			// 兼容旧数据：未设置 role_key 时回退到计划名称映射
+			s.EffectiveRole = rbac.PlanNameToRole(*planName)
+		}
+		if pricingID != nil {
+			s.Pricing = &subscriptionPricing{
+				ID:             *pricingID,
+				DurationMonths: *durationMonths,
+				Price:          *price,
+				Currency:       *currency,
+			}
+		}
+		if subscribedAt != nil {
+			s.SubscribedAt = subscribedAt
+		}
+		if expiresAt != nil {
+			s.ExpiresAt = expiresAt
+		}
+
+		result = append(result, s)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"tenants": result})
+	c.JSON(http.StatusOK, gin.H{"subscriptions": result})
 }
 
-func listProjectsHandler(c *gin.Context) {
-	conn := tenant.ConnFromContext(c)
-	t, _ := tenant.TenantFromContext(c)
+type createTenantRequest struct {
+	Slug      string    `json:"slug"`
+	PlanID    uuid.UUID `json:"plan_id" binding:"required"`
+	PricingID uuid.UUID `json:"pricing_id" binding:"required"`
+	AutoRenew bool      `json:"auto_renew"`
+}
 
-	rows, err := conn.Query(c.Request.Context(),
-		`SELECT id, name, description, created_by, created_at
-		 FROM projects
-		 WHERE tenant_id = $1
-		 ORDER BY created_at DESC`,
-		t.ID,
+func createTenantHandler(c *gin.Context) {
+	var req createTenantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	conn := tenant.ConnFromContext(c)
+	userID := tenant.UserIDFromContext(c)
+	ctx := c.Request.Context()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 校验 pricing 属于 plan，并读取计划名称和时长
+	var planName string
+	var durationMonths int
+	err = tx.QueryRow(ctx,
+		queries.TenantValidatePricingForPlan,
+		req.PricingID, req.PlanID,
+	).Scan(&planName, &durationMonths)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan or pricing"})
+		return
+	}
+
+	subName := fmt.Sprintf("%s (%d months)", planName, durationMonths)
+
+	var tenantID uuid.UUID
+	subscribedAt := time.Now()
+	expiresAt := subscribedAt.AddDate(0, durationMonths, 0)
+
+	err = tx.QueryRow(ctx,
+		queries.TenantInsertTenant,
+		subName, req.Slug, req.PlanID, req.PricingID, subscribedAt, expiresAt, req.AutoRenew, userID,
+	).Scan(&tenantID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	_, err = tx.Exec(ctx,
+		queries.TenantInsertOwnerMembership,
+		tenantID, userID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	defer rows.Close()
 
-	type projectResp struct {
-		ID          uuid.UUID  `json:"id"`
-		Name        string     `json:"name"`
-		Description *string    `json:"description,omitempty"`
-		CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
-		CreatedAt   time.Time  `json:"created_at"`
-	}
-	var result []projectResp
-	for rows.Next() {
-		var p projectResp
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedBy, &p.CreatedAt); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		result = append(result, p)
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"projects": result})
+	c.JSON(http.StatusCreated, gin.H{
+		"id":            tenantID,
+		"name":          subName,
+		"plan_id":       req.PlanID,
+		"pricing_id":    req.PricingID,
+		"subscribed_at": subscribedAt,
+		"expires_at":    expiresAt,
+		"auto_renew":    req.AutoRenew,
+		"role":          "owner",
+	})
 }
 
-func createProjectHandler(c *gin.Context) {
+func getTenantHandler(c *gin.Context) {
+	conn := tenant.ConnFromContext(c)
+	t, _ := tenant.TenantFromContext(c)
+
+	var result struct {
+		ID             uuid.UUID  `json:"id"`
+		Name           string     `json:"name"`
+		Slug           *string    `json:"slug,omitempty"`
+		PlanID         *uuid.UUID `json:"plan_id,omitempty"`
+		PlanName       *string    `json:"plan_name,omitempty"`
+		PricingID      *uuid.UUID `json:"pricing_id,omitempty"`
+		DurationMonths *int       `json:"duration_months,omitempty"`
+		Price          *float64   `json:"price,omitempty"`
+		Status         string     `json:"status"`
+		SubscribedAt   *time.Time `json:"subscribed_at,omitempty"`
+		ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+		AutoRenew      bool       `json:"auto_renew"`
+		CreatedBy      *uuid.UUID `json:"created_by,omitempty"`
+		CreatedAt      time.Time  `json:"created_at"`
+	}
+
+	err := conn.QueryRow(c.Request.Context(),
+		queries.TenantSelectByID,
+		t.ID,
+	).Scan(&result.ID, &result.Name, &result.Slug, &result.Status,
+		&result.PlanID, &result.PlanName, &result.PricingID, &result.DurationMonths, &result.Price,
+		&result.SubscribedAt, &result.ExpiresAt, &result.AutoRenew,
+		&result.CreatedBy, &result.CreatedAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func updateTenantHandler(c *gin.Context) {
 	var req struct {
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -96,19 +232,176 @@ func createProjectHandler(c *gin.Context) {
 
 	conn := tenant.ConnFromContext(c)
 	t, _ := tenant.TenantFromContext(c)
+
+	_, err := conn.Exec(c.Request.Context(),
+		queries.TenantUpdate,
+		req.Name, req.Slug, t.ID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "subscription updated"})
+}
+
+func deleteTenantHandler(c *gin.Context) {
+	conn := tenant.ConnFromContext(c)
+	t, _ := tenant.TenantFromContext(c)
+
+	_, err := conn.Exec(c.Request.Context(),
+		queries.TenantDelete,
+		t.ID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "subscription deleted"})
+}
+
+func updateTenantPlanHandler(c *gin.Context) {
+	var req struct {
+		PlanID    uuid.UUID `json:"plan_id" binding:"required"`
+		PricingID uuid.UUID `json:"pricing_id" binding:"required"`
+		AutoRenew bool      `json:"auto_renew"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	conn := tenant.ConnFromContext(c)
+	t, _ := tenant.TenantFromContext(c)
+	ctx := c.Request.Context()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var durationMonths int
+	err = tx.QueryRow(ctx,
+		queries.TenantSelectPricingDuration,
+		req.PricingID, req.PlanID,
+	).Scan(&durationMonths)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan or pricing"})
+		return
+	}
+
+	subscribedAt := time.Now()
+	expiresAt := subscribedAt.AddDate(0, durationMonths, 0)
+
+	_, err = tx.Exec(ctx,
+		queries.TenantUpdatePlan,
+		req.PlanID, req.PricingID, subscribedAt, expiresAt, req.AutoRenew, t.ID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"plan_id":       req.PlanID,
+		"pricing_id":    req.PricingID,
+		"subscribed_at": subscribedAt,
+		"expires_at":    expiresAt,
+		"auto_renew":    req.AutoRenew,
+	})
+}
+
+func listProjectsHandler(c *gin.Context) {
+	conn := tenant.ConnFromContext(c)
+	t, _ := tenant.TenantFromContext(c)
+
+	tx, err := conn.Begin(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
+	rows, err := tx.Query(c.Request.Context(),
+		queries.ProjectsListAccessible,
+		t.ID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var result []projectResp
+	for rows.Next() {
+		var p projectResp
+		if err := rows.Scan(
+			&p.ID, &p.TenantID, &p.SourceScope, &p.Kind, &p.Status, &p.SourceType,
+			&p.Name, &p.Description, &p.EndpointURL, &p.RequestMethod, &p.RequestPath,
+			&p.RequestHeaders, &p.RequestBodyTemplate, &p.AuthType, &p.AuthConfig,
+			&p.CapabilitySummary, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.LastPublishedAt,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		result = append(result, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	rows.Close()
+
+	if err := hydrateProjectDetails(c, tx, result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"projects": result})
+}
+
+func createProjectHandler(c *gin.Context) {
+	var req projectUpsertReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	normalizeProjectDefaults(&req)
+
+	conn := tenant.ConnFromContext(c)
+	t, _ := tenant.TenantFromContext(c)
 	userID := tenant.UserIDFromContext(c)
 
-	description := req.Description
+	tx, err := conn.Begin(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
 
 	var id uuid.UUID
-	err := conn.QueryRow(c.Request.Context(),
-		`INSERT INTO projects (tenant_id, name, description, created_by)
-		 VALUES ($1, $2, NULLIF($3, ''), $4)
-		 RETURNING id`,
-		t.ID, req.Name, description, userID,
+	err = tx.QueryRow(c.Request.Context(),
+		queries.ProjectsInsert,
+		t.ID, "tenant", req.Status, req.SourceType,
+		req.Name, req.Description, req.EndpointURL, req.RequestMethod, req.RequestPath,
+		req.RequestHeaders, req.RequestBodyTemplate, req.AuthType, req.AuthConfig,
+		req.CapabilitySummary, userID,
 	).Scan(&id)
 
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

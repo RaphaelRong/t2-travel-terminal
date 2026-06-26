@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
     slug text UNIQUE,
-    plan_id text DEFAULT 'free',
     status text DEFAULT 'active',
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()

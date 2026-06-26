@@ -7,6 +7,7 @@ import (
 
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/config"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/datastore"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func main() {
 	defer pool.Close()
 
 	tag, err := pool.Exec(ctx,
-		`UPDATE users SET email_verified = true, email_verified_at = now() WHERE email = $1`,
+		queries.CommonVerifyUserEmail,
 		email,
 	)
 	if err != nil {
@@ -45,7 +46,7 @@ func main() {
 	}
 
 	_, _ = pool.Exec(ctx,
-		`UPDATE email_verifications SET used_at = now() WHERE user_id = (SELECT id FROM users WHERE email = $1)`,
+		queries.CommonMarkEmailVerificationUsedByEmail,
 		email,
 	)
 

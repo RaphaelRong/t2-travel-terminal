@@ -32,7 +32,7 @@ func New(cfg *config.Config, logger *zap.Logger, pool *datastore.Pool) *Server {
 		logger.Fatal("failed to create token manager", zap.Error(err))
 	}
 
-	api.RegisterRoutes(r, logger, pool, tm)
+	api.RegisterRoutes(r, logger, pool, tm, cfg)
 
 	return &Server{
 		cfg:    cfg,

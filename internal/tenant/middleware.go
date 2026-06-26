@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/auth"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/datastore"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/rbac"
 	"go.uber.org/zap"
 )
 
@@ -34,7 +36,7 @@ func Middleware(pool *datastore.Pool, logger *zap.Logger, tm *auth.TokenManager)
 
 		// 设置会话级 RLS 变量（当前用户）
 		if _, err := conn.Exec(c.Request.Context(),
-			"SELECT set_config('app.current_user_id', $1, false)",
+			queries.CommonSetCurrentUserID,
 			userID.String(),
 		); err != nil {
 			resetAndRelease(conn)
@@ -49,7 +51,25 @@ func Middleware(pool *datastore.Pool, logger *zap.Logger, tm *auth.TokenManager)
 		SetUserID(c, userID)
 		SetConn(c, conn)
 
-		// 可选：解析并验证 X-Tenant-ID
+		// 首先确定用户是否为 SuperAdmin。该信息在全局上下文和租户上下文中都需要，
+		// 因此无论是否带 X-Tenant-ID 都先查询一次。
+		var isSuperAdmin bool
+		err = conn.QueryRow(c.Request.Context(),
+			queries.AdminSelectSuperAdmin,
+			userID,
+		).Scan(&isSuperAdmin)
+		if err != nil {
+			logger.Error("failed to lookup superadmin status", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user role"})
+			return
+		}
+
+		effectiveRole := rbac.RoleFreeUser
+		if isSuperAdmin {
+			effectiveRole = rbac.RoleSuperAdmin
+		}
+
+		// 可选：解析并验证 X-Tenant-ID，并据此调整普通用户的 effective role。
 		tenantIDStr := c.GetHeader("X-Tenant-ID")
 		if tenantIDStr != "" {
 			tenantID, err := uuid.Parse(tenantIDStr)
@@ -58,34 +78,60 @@ func Middleware(pool *datastore.Pool, logger *zap.Logger, tm *auth.TokenManager)
 				return
 			}
 
-			var role string
-			err = conn.QueryRow(c.Request.Context(),
-				"SELECT role FROM memberships WHERE tenant_id = $1 AND user_id = $2",
-				tenantID, userID,
-			).Scan(&role)
+			if isSuperAdmin {
+				// SuperAdmin 可进入任意租户上下文，不依赖 memberships 表。
+				// memberships 表启用 RLS，直接查询会导致非该租户成员的 SuperAdmin 被拒绝。
+				if _, err := conn.Exec(c.Request.Context(),
+					queries.CommonSetCurrentTenantID,
+					tenantID.String(),
+				); err != nil {
+					logger.Error("failed to set current_tenant_id", zap.Error(err))
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to set tenant context"})
+					return
+				}
+				SetTenant(c, Tenant{
+					ID:            tenantID,
+					Role:          string(rbac.TenantOwner),
+					EffectiveRole: rbac.RoleSuperAdmin,
+				})
+			} else {
+				var membershipRole, planRoleKey string
+				err = conn.QueryRow(c.Request.Context(),
+					queries.CommonSelectMembershipAndPlan,
+					tenantID, userID,
+				).Scan(&membershipRole, &planRoleKey)
 
-			if err == pgx.ErrNoRows {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "not a member of this tenant"})
-				return
-			}
-			if err != nil {
-				logger.Error("failed to lookup membership", zap.Error(err))
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "membership lookup failed"})
-				return
-			}
+				if err == pgx.ErrNoRows {
+					// X-Tenant-ID 指向的租户当前用户无权访问。
+					// 对于不需要租户上下文的接口（如 /me）不应直接拒绝，
+					// 继续执行但不设置租户上下文；需要租户的接口由 RequireTenant 拦截。
+					logger.Debug("X-Tenant-ID points to a tenant the user is not a member of", zap.String("tenant_id", tenantID.String()))
+				} else if err != nil {
+					logger.Error("failed to lookup membership", zap.Error(err))
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "membership lookup failed"})
+					return
+				} else {
+					if _, err := conn.Exec(c.Request.Context(),
+						queries.CommonSetCurrentTenantID,
+						tenantID.String(),
+					); err != nil {
+						logger.Error("failed to set current_tenant_id", zap.Error(err))
+						c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to set tenant context"})
+						return
+					}
 
-			if _, err := conn.Exec(c.Request.Context(),
-				"SELECT set_config('app.current_tenant_id', $1, false)",
-				tenantID.String(),
-			); err != nil {
-				logger.Error("failed to set current_tenant_id", zap.Error(err))
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to set tenant context"})
-				return
+					effectiveRole = rbac.RoleKeyToRole(planRoleKey)
+					SetTenant(c, Tenant{
+						ID:            tenantID,
+						Role:          membershipRole,
+						Plan:          planRoleKey,
+						EffectiveRole: effectiveRole,
+					})
+				}
 			}
-
-			SetTenant(c, Tenant{ID: tenantID, Role: role})
 		}
 
+		SetEffectiveRole(c, effectiveRole)
 		c.Next()
 	}
 }
@@ -101,7 +147,7 @@ func RequireTenant() gin.HandlerFunc {
 	}
 }
 
-// RequireRole 要求当前用户在当前租户中拥有指定角色之一。
+// RequireRole 要求当前用户在当前租户中拥有指定成员角色之一。
 func RequireRole(allowed ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !HasTenant(c) {
@@ -116,6 +162,33 @@ func RequireRole(allowed ...string) gin.HandlerFunc {
 			}
 		}
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+	}
+}
+
+// RequireEffectiveRole 要求当前用户的系统级 effective role 在允许列表内。
+func RequireEffectiveRole(allowed ...rbac.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := EffectiveRoleFromContext(c)
+		for _, allowedRole := range allowed {
+			if role == allowedRole {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+	}
+}
+
+// RequireSubscriptionAtLeast 要求当前用户的订阅级别不低于指定角色。
+// SuperAdmin 始终通过。
+func RequireSubscriptionAtLeast(minRole rbac.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := EffectiveRoleFromContext(c)
+		if !rbac.IsAtLeastSubscription(role, minRole) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "subscription plan insufficient"})
+			return
+		}
+		c.Next()
 	}
 }
 
@@ -143,7 +216,7 @@ func resolveUserID(c *gin.Context, tm *auth.TokenManager) (uuid.UUID, error) {
 // resetAndRelease 在连接归还前清空 RLS 会话变量。
 func resetAndRelease(conn *pgxpool.Conn) {
 	ctx := context.Background()
-	_, _ = conn.Exec(ctx, "SELECT set_config('app.current_user_id', '', false)")
-	_, _ = conn.Exec(ctx, "SELECT set_config('app.current_tenant_id', '', false)")
+	_, _ = conn.Exec(ctx, queries.CommonResetCurrentUserID)
+	_, _ = conn.Exec(ctx, queries.CommonResetCurrentTenantID)
 	conn.Release()
 }

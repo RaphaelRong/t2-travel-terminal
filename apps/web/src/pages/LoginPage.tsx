@@ -1,12 +1,15 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from '../components/ThemeToggle'
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const setToken = useAuthStore((s) => s.setToken)
+  const setSuperAdmin = useAuthStore((s) => s.setSuperAdmin)
+  const setRole = useAuthStore((s) => s.setRole)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -18,8 +21,11 @@ export function LoginPage() {
     setLoading(true)
     try {
       const res = await api.post('/auth/login', { email, password })
+      const role = res.data.role ?? 'free_user'
       setToken(res.data.access_token)
-      navigate('/')
+      setSuperAdmin(res.data.is_superadmin === true)
+      setRole(role)
+      navigate(searchParams.get('redirect') || '/playground')
     } catch (err) {
       setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Login failed')
     } finally {

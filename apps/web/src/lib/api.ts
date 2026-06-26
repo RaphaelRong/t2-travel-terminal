@@ -14,6 +14,8 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  // 所有需要租户上下文的接口统一由后端根据用户角色授权。
+  // SuperAdmin 即使不属于该租户，也能通过 tenant.Middleware 进入任意租户上下文。
   const currentTenant = useTenantStore.getState().currentTenant
   if (currentTenant) {
     config.headers['X-Tenant-ID'] = currentTenant.id

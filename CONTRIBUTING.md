@@ -27,7 +27,7 @@ We encourage community contributions to the T2 ecosystem:
 - **Skills** — reusable, composable capabilities (e.g., price sentiment, event impact).
 - **Agents** — end-to-end autonomous workflows for revenue management, distribution, etc.
 
-See `docs/` for extension guidelines and the Developer Center (coming soon).
+See `docs/` for extension guidelines and the Developer Center.
 
 ## 📝 Code Standards
 

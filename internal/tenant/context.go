@@ -8,20 +8,24 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/rbac"
 )
 
 type ctxKey string
 
 const (
-	ctxUserKey   ctxKey = "tenant.user_id"
-	ctxTenantKey ctxKey = "tenant.tenant"
-	ctxConnKey   ctxKey = "tenant.conn"
+	ctxUserKey          ctxKey = "tenant.user_id"
+	ctxTenantKey        ctxKey = "tenant.tenant"
+	ctxConnKey          ctxKey = "tenant.conn"
+	ctxEffectiveRoleKey ctxKey = "tenant.effective_role"
 )
 
 // Tenant 表示当前请求所归属的租户及成员角色。
 type Tenant struct {
-	ID   uuid.UUID
-	Role string
+	ID             uuid.UUID
+	Role           string          // 租户成员角色：owner / admin / member
+	Plan           string          // 订阅计划名称：Free Trial / Basic / Advanced
+	EffectiveRole  rbac.Role       // 系统级有效角色：superadmin / free_user / paid_user / premium_paid_user
 }
 
 // SetUserID 在 gin 上下文中保存当前用户 ID。
@@ -71,3 +75,28 @@ func HasTenant(c *gin.Context) bool {
 	_, exists := c.Get(string(ctxTenantKey))
 	return exists
 }
+
+// SetEffectiveRole 在 gin 上下文中保存当前用户的系统级有效角色。
+func SetEffectiveRole(c *gin.Context, role rbac.Role) {
+	c.Set(string(ctxEffectiveRoleKey), role)
+}
+
+// EffectiveRoleFromContext 读取当前请求的系统级有效角色。
+// 若未设置，则返回 RoleFreeUser 作为默认最小权限。
+func EffectiveRoleFromContext(c *gin.Context) rbac.Role {
+	v, exists := c.Get(string(ctxEffectiveRoleKey))
+	if !exists {
+		return rbac.RoleFreeUser
+	}
+	return v.(rbac.Role)
+}
+
+// MembershipRoleFromContext 读取当前请求在租户中的成员角色（若存在）。
+func MembershipRoleFromContext(c *gin.Context) string {
+	if t, ok := TenantFromContext(c); ok {
+		return t.Role
+	}
+	return ""
+}
+
+

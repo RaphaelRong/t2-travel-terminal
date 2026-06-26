@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/auth"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/tenant"
 )
 
@@ -15,11 +16,7 @@ func listMembersHandler(c *gin.Context) {
 	t, _ := tenant.TenantFromContext(c)
 
 	rows, err := conn.Query(c.Request.Context(),
-		`SELECT u.id, u.email, u.name, m.role, m.joined_at
-		 FROM memberships m
-		 JOIN users u ON m.user_id = u.id
-		 WHERE m.tenant_id = $1
-		 ORDER BY m.joined_at`,
+		queries.MembersListByTenant,
 		t.ID,
 	)
 	if err != nil {
@@ -29,11 +26,11 @@ func listMembersHandler(c *gin.Context) {
 	defer rows.Close()
 
 	type memberResp struct {
-		UserID   uuid.UUID  `json:"user_id"`
-		Email    string     `json:"email"`
-		Name     *string    `json:"name,omitempty"`
-		Role     string     `json:"role"`
-		JoinedAt time.Time  `json:"joined_at"`
+		UserID   uuid.UUID `json:"user_id"`
+		Email    string    `json:"email"`
+		Name     *string   `json:"name,omitempty"`
+		Role     string    `json:"role"`
+		JoinedAt time.Time `json:"joined_at"`
 	}
 
 	var result []memberResp
@@ -71,8 +68,7 @@ func inviteMemberHandler(c *gin.Context) {
 	}
 
 	_, err = conn.Exec(c.Request.Context(),
-		`INSERT INTO tenant_invites (tenant_id, email, role, token, expires_at)
-		 VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
+		queries.MembersInsertInvite,
 		t.ID, req.Email, req.Role, token,
 	)
 	if err != nil {
@@ -81,7 +77,7 @@ func inviteMemberHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"token":     token,
+		"token":      token,
 		"invite_url": "/api/v1/invites/accept?token=" + token,
 	})
 }
@@ -110,11 +106,7 @@ func acceptInviteHandler(c *gin.Context) {
 		Role     string
 	}
 	err = tx.QueryRow(ctx,
-		`SELECT tenant_id, email, role FROM tenant_invites
-		 WHERE token = $1
-		   AND used_at IS NULL
-		   AND expires_at > now()
-		 FOR UPDATE`,
+		queries.MembersSelectInvite,
 		token,
 	).Scan(&invite.TenantID, &invite.Email, &invite.Role)
 	if err != nil {
@@ -124,7 +116,7 @@ func acceptInviteHandler(c *gin.Context) {
 
 	var userEmail string
 	err = tx.QueryRow(ctx,
-		`SELECT email FROM users WHERE id = $1`,
+		queries.MembersSelectUserEmail,
 		userID,
 	).Scan(&userEmail)
 	if err != nil {
@@ -137,9 +129,7 @@ func acceptInviteHandler(c *gin.Context) {
 	}
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO memberships (tenant_id, user_id, role)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+		queries.MembersUpsertMembership,
 		invite.TenantID, userID, invite.Role,
 	)
 	if err != nil {
@@ -148,7 +138,7 @@ func acceptInviteHandler(c *gin.Context) {
 	}
 
 	_, err = tx.Exec(ctx,
-		`UPDATE tenant_invites SET used_at = now() WHERE token = $1`,
+		queries.MembersMarkInviteUsed,
 		token,
 	)
 	if err != nil {
@@ -179,8 +169,7 @@ func removeMemberHandler(c *gin.Context) {
 
 	// 不能移除 owner（更严格的逻辑可以在应用层做）
 	_, err = conn.Exec(c.Request.Context(),
-		`DELETE FROM memberships
-		 WHERE tenant_id = $1 AND user_id = $2 AND role != 'owner'`,
+		queries.MembersRemove,
 		t.ID, targetUserID,
 	)
 	if err != nil {
@@ -212,9 +201,7 @@ func updateMemberRoleHandler(c *gin.Context) {
 	}
 
 	_, err = conn.Exec(c.Request.Context(),
-		`UPDATE memberships
-		 SET role = $1
-		 WHERE tenant_id = $2 AND user_id = $3 AND role != 'owner'`,
+		queries.MembersUpdateRole,
 		req.Role, t.ID, targetUserID,
 	)
 	if err != nil {

@@ -45,7 +45,7 @@ export function MembersPage() {
     return (
       <section className="border border-obsidian-border-dim bg-obsidian-surface p-6">
         <p className="font-mono text-sm text-obsidian-text-secondary">
-          Please select or create a workspace first.
+          Please select or create a subscription first.
         </p>
       </section>
     )

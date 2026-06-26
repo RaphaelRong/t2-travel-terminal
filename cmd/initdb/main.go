@@ -17,15 +17,11 @@ import (
 
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/config"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/datastore"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
 	"go.uber.org/zap"
 )
 
-const schemaMigrationsTable = `
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version TEXT PRIMARY KEY,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-`
+const schemaMigrationsTable = queries.CommonCreateSchemaMigrationsTable
 
 type migration struct {
 	version string
@@ -158,7 +154,7 @@ func loadMigrations(dir string) ([]migration, error) {
 }
 
 func appliedVersions(ctx context.Context, pool *datastore.Pool) (map[string]bool, error) {
-	rows, err := pool.Query(ctx, "SELECT version FROM schema_migrations")
+	rows, err := pool.Query(ctx, queries.CommonSelectAppliedVersions)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +194,7 @@ func migrateUp(ctx context.Context, pool *datastore.Pool, migrations []migration
 		}
 
 		if _, err := tx.Exec(ctx,
-			"INSERT INTO schema_migrations (version) VALUES ($1)", m.version,
+			queries.CommonInsertSchemaMigration, m.version,
 		); err != nil {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("record migration %s: %w", m.version, err)
@@ -217,7 +213,7 @@ func migrateUp(ctx context.Context, pool *datastore.Pool, migrations []migration
 
 func migrateDown(ctx context.Context, pool *datastore.Pool, migrations []migration, logger *zap.Logger) error {
 	rows, err := pool.Query(ctx,
-		"SELECT version FROM schema_migrations ORDER BY version DESC",
+		queries.CommonSelectAppliedVersionsDesc,
 	)
 	if err != nil {
 		return fmt.Errorf("fetch applied versions: %w", err)
@@ -258,7 +254,7 @@ func migrateDown(ctx context.Context, pool *datastore.Pool, migrations []migrati
 		}
 
 		if _, err := tx.Exec(ctx,
-			"DELETE FROM schema_migrations WHERE version = $1", version,
+			queries.CommonDeleteSchemaMigration, version,
 		); err != nil {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("delete migration record %s: %w", version, err)

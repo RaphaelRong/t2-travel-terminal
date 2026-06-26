@@ -2,8 +2,9 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { ThemeToggle } from './ThemeToggle'
 
-const navItems = [
-  { to: '/', label: 'Dashboard' },
+const baseNavItems = [
+  { to: '/', label: 'Globe' },
+  { to: '/playground', label: 'Playground' },
   { to: '/projects', label: 'Projects' },
   { to: '/members', label: 'Members' },
   { to: '/plans', label: 'Plans' },
@@ -12,8 +13,13 @@ const navItems = [
 
 export function Layout() {
   const logout = useAuthStore((s) => s.logout)
+  const role = useAuthStore((s) => s.role)
   const navigate = useNavigate()
   const location = useLocation()
+
+  const navItems = role === 'superadmin'
+    ? [...baseNavItems, { to: '/admin/plans', label: 'Admin' }]
+    : baseNavItems
 
   const handleLogout = () => {
     logout()
