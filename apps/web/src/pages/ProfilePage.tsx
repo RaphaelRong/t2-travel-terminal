@@ -182,6 +182,8 @@ function LLMProfilesSection() {
   const queryClient = useQueryClient()
   const [form, setForm] = useState<LLMProfileFormState>(emptyLLMProfileForm)
   const [formError, setFormError] = useState('')
+  const [isFetchingModels, setIsFetchingModels] = useState(false)
+  const [fetchError, setFetchError] = useState('')
 
   const { data: profiles = [], isLoading } = useQuery({
     queryKey: ['llm-profiles'],
@@ -216,6 +218,43 @@ function LLMProfilesSection() {
       setForm((current) => (current.id ? emptyLLMProfileForm : current))
     },
   })
+
+  const handleFetchModels = async () => {
+    if (!form.api_key.trim()) {
+      setFetchError('API key is required')
+      return
+    }
+    if (
+      !form.base_url.trim() &&
+      form.provider !== 'anthropic' &&
+      form.provider !== 'google'
+    ) {
+      setFetchError('Endpoint base URL is required for this provider')
+      return
+    }
+    setIsFetchingModels(true)
+    setFetchError('')
+    try {
+      const res = await api.post<{ models: string[] }>('/llm-profiles/fetch-models', {
+        provider: form.provider,
+        base_url: form.base_url,
+        api_key: form.api_key,
+      })
+      const models = res.data.models
+      if (models.length === 0) {
+        setFetchError('No models returned from provider')
+        return
+      }
+      updateForm({
+        models: models.join('\n'),
+        default_model: form.default_model || models[0],
+      })
+    } catch (err: any) {
+      setFetchError(err.response?.data?.error || err.message || 'Failed to fetch models')
+    } finally {
+      setIsFetchingModels(false)
+    }
+  }
 
   const updateForm = (patch: Partial<LLMProfileFormState>) => {
     setForm((current) => ({ ...current, ...patch }))
@@ -412,9 +451,22 @@ function LLMProfilesSection() {
           </label>
 
           <label className="block">
-            <span className="mb-1 block font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
-              Available Models
-            </span>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
+                Available Models
+              </span>
+              <button
+                type="button"
+                onClick={handleFetchModels}
+                disabled={isFetchingModels}
+                className="border border-obsidian-border-dim bg-obsidian-base px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-obsidian-text-secondary transition-colors hover:border-obsidian-accent hover:text-obsidian-accent disabled:opacity-50"
+              >
+                {isFetchingModels ? 'Fetching...' : 'Fetch Models'}
+              </button>
+            </div>
+            {fetchError && (
+              <p className="mb-1 font-mono text-xs text-obsidian-negative">{fetchError}</p>
+            )}
             <textarea
               value={form.models}
               onChange={(e) => updateForm({ models: e.target.value })}

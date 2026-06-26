@@ -78,6 +78,7 @@ func RegisterRoutes(r *gin.Engine, logger *zap.Logger, pool *datastore.Pool, tm 
 			authGroup.DELETE("/me", deleteMeHandler)
 			authGroup.GET("/llm-profiles", listLLMProfilesHandler)
 			authGroup.POST("/llm-profiles", createLLMProfileHandler)
+			authGroup.POST("/llm-profiles/fetch-models", fetchLLMModelsHandler)
 			authGroup.PUT("/llm-profiles/:profile_id", updateLLMProfileHandler)
 			authGroup.DELETE("/llm-profiles/:profile_id", deleteLLMProfileHandler)
 

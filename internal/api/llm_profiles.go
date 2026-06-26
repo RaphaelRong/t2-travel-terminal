@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -301,4 +305,147 @@ func decodeModelList(raw json.RawMessage) []string {
 		return []string{}
 	}
 	return cleanModelList(models)
+}
+
+type fetchLLMModelsRequest struct {
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key"`
+}
+
+type openAIModelsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+type googleModelsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+func fetchLLMModelsHandler(c *gin.Context) {
+	var req fetchLLMModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Provider = strings.TrimSpace(req.Provider)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	req.APIKey = strings.TrimSpace(req.APIKey)
+	if req.APIKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "api_key is required"})
+		return
+	}
+	if req.Provider == "" {
+		req.Provider = "custom"
+	}
+	if !validLLMProvider(req.Provider) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})
+		return
+	}
+
+	models, err := fetchLLMModels(c.Request.Context(), req.Provider, req.BaseURL, req.APIKey)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"models": cleanModelList(models)})
+}
+
+func fetchLLMModels(ctx context.Context, provider, baseURL, apiKey string) ([]string, error) {
+	switch provider {
+	case "openai", "custom":
+		return fetchOpenAICompatibleModels(ctx, baseURL, apiKey)
+	case "anthropic":
+		return fetchAnthropicModels(ctx, apiKey)
+	case "google":
+		return fetchGoogleModels(ctx, apiKey)
+	default:
+		return nil, fmt.Errorf("unsupported provider")
+	}
+}
+
+func fetchOpenAICompatibleModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	return doOpenAIModelsRequest(req)
+}
+
+func fetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.anthropic.com/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	return doOpenAIModelsRequest(req)
+}
+
+func doOpenAIModelsRequest(req *http.Request) ([]string, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	var decoded openAIModelsResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, fmt.Errorf("invalid model list response")
+	}
+	models := make([]string, 0, len(decoded.Data))
+	for _, item := range decoded.Data {
+		if item.ID != "" {
+			models = append(models, item.ID)
+		}
+	}
+	return models, nil
+}
+
+func fetchGoogleModels(ctx context.Context, apiKey string) ([]string, error) {
+	endpoint := "https://generativelanguage.googleapis.com/v1beta/models?key=" + url.QueryEscape(apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	var decoded googleModelsResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, fmt.Errorf("invalid model list response")
+	}
+	models := make([]string, 0, len(decoded.Models))
+	for _, item := range decoded.Models {
+		name := strings.TrimPrefix(item.Name, "models/")
+		if name != "" {
+			models = append(models, name)
+		}
+	}
+	return models, nil
 }
