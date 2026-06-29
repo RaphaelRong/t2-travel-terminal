@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	projectsync "github.com/t2-travel-terminal/t2-travel-terminal/internal/project"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/rbac"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/tenant"
@@ -330,35 +331,16 @@ func listProjectsHandler(c *gin.Context) {
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
 
-	rows, err := tx.Query(c.Request.Context(),
-		queries.ProjectsListAccessible,
-		t.ID,
-	)
+	projects, err := projectsync.NewSyncService().ListAccessibleProjects(c.Request.Context(), tx, t.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	var result []projectResp
-	for rows.Next() {
-		var p projectResp
-		if err := rows.Scan(
-			&p.ID, &p.TenantID, &p.SourceScope, &p.Kind, &p.Status, &p.SourceType,
-			&p.Name, &p.Description, &p.EndpointURL, &p.RequestMethod, &p.RequestPath,
-			&p.RequestHeaders, &p.RequestBodyTemplate, &p.AuthType, &p.AuthConfig,
-			&p.CapabilitySummary, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.LastPublishedAt,
-		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		result = append(result, p)
+	result := make([]projectResp, 0, len(projects))
+	for _, project := range projects {
+		result = append(result, toProjectResp(project))
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	rows.Close()
 
 	if err := hydrateProjectDetails(c, tx, result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -387,14 +369,7 @@ func createProjectHandler(c *gin.Context) {
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
 
-	var id uuid.UUID
-	err = tx.QueryRow(c.Request.Context(),
-		queries.ProjectsInsert,
-		t.ID, "tenant", req.Status, req.SourceType,
-		req.Name, req.Description, req.EndpointURL, req.RequestMethod, req.RequestPath,
-		req.RequestHeaders, req.RequestBodyTemplate, req.AuthType, req.AuthConfig,
-		req.CapabilitySummary, userID,
-	).Scan(&id)
+	id, err := projectsync.NewSyncService().CreateProject(c.Request.Context(), tx, projectInputFromReq(req, t.ID, "tenant", userID))
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

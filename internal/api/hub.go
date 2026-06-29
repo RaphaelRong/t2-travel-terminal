@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/config"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/hub"
+	projectsync "github.com/t2-travel-terminal/t2-travel-terminal/internal/project"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/tenant"
 )
 
@@ -161,7 +162,7 @@ func (h *hubHandler) deleteProviderCredential(c *gin.Context) {
 }
 
 func (h *hubHandler) ticketmasterManifest(c *gin.Context) {
-	manifest := ticketmasterSkillManifestDocument()
+	manifest := projectsync.TicketmasterSkillManifestDocument()
 	manifest["provider"] = gin.H{
 		"id":          "ticketmaster",
 		"name":        "Ticketmaster",
