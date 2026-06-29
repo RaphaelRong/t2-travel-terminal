@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/integration"
+	"github.com/t2-travel-terminal/t2-travel-terminal/internal/jsonx"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/queries"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/tenant"
 	"gopkg.in/yaml.v3"
@@ -123,13 +125,7 @@ type projectUpsertReq struct {
 }
 
 func normalizedJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return json.RawMessage(`{}`)
-	}
-	if !json.Valid(raw) {
-		return json.RawMessage(`{}`)
-	}
-	return raw
+	return jsonx.Object(raw)
 }
 
 func normalizeProjectDefaults(req *projectUpsertReq) {
@@ -1310,11 +1306,7 @@ func rawObjectField(item map[string]any, keys ...string) json.RawMessage {
 }
 
 func mustJSON(value any) json.RawMessage {
-	body, err := json.Marshal(value)
-	if err != nil || len(body) == 0 {
-		return json.RawMessage(`{}`)
-	}
-	return body
+	return jsonx.MustMarshalObject(value)
 }
 
 func normalizeYAMLValue(value any) any {
@@ -1393,42 +1385,9 @@ func firstNonEmpty(values ...string) string {
 }
 
 func applyHeaders(req *http.Request, raw json.RawMessage) {
-	headers := map[string]string{}
-	if err := json.Unmarshal(raw, &headers); err == nil {
-		for key, value := range headers {
-			if strings.TrimSpace(key) != "" {
-				req.Header.Set(key, value)
-			}
-		}
-	}
+	integration.ApplyRawHeaders(req.Header, raw)
 }
 
 func applyAuth(req *http.Request, authType string, rawConfig json.RawMessage) {
-	config := map[string]string{}
-	_ = json.Unmarshal(rawConfig, &config)
-
-	switch authType {
-	case "bearer":
-		if token := strings.TrimSpace(config["token"]); token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	case "api_key":
-		key := strings.TrimSpace(config["key"])
-		if key == "" {
-			key = strings.TrimSpace(config["api_key"])
-		}
-		header := strings.TrimSpace(config["header"])
-		if header == "" {
-			header = "X-API-Key"
-		}
-		if key != "" {
-			req.Header.Set(header, key)
-		}
-	case "basic":
-		username := config["username"]
-		password := config["password"]
-		if username != "" || password != "" {
-			req.SetBasicAuth(username, password)
-		}
-	}
+	integration.ApplyAuth(req, integration.RawAuthConfig(authType, rawConfig))
 }

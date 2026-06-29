@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	agentapi "github.com/t2-travel-terminal/t2-travel-terminal/internal/agent/api"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/auth"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/config"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/datastore"
@@ -34,6 +35,7 @@ func RegisterRoutes(r *gin.Engine, logger *zap.Logger, pool *datastore.Pool, tm 
 	plansHandler := newPlansHandler(pool)
 	adminHandler := newAdminHandler()
 	hubHandler := newHubHandler(cfg)
+	agentHandler := agentapi.NewHandler(cfg)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -82,6 +84,25 @@ func RegisterRoutes(r *gin.Engine, logger *zap.Logger, pool *datastore.Pool, tm 
 			authGroup.PUT("/llm-profiles/:profile_id", updateLLMProfileHandler)
 			authGroup.DELETE("/llm-profiles/:profile_id", deleteLLMProfileHandler)
 
+			// Agent 接口
+			authGroup.GET("/agent/soul", agentHandler.GetSoul)
+			authGroup.PUT("/agent/soul", agentHandler.UpdateSoul)
+			authGroup.GET("/agent/memory", agentHandler.ListMemory)
+			authGroup.POST("/agent/memory/search", agentHandler.SearchMemory)
+			authGroup.POST("/agent/memory", agentHandler.CreateMemory)
+			authGroup.DELETE("/agent/memory/:memory_id", agentHandler.DeleteMemory)
+			authGroup.GET("/agent/sessions", agentHandler.ListSessions)
+			authGroup.POST("/agent/sessions", agentHandler.CreateSession)
+			authGroup.GET("/agent/sessions/:session_id", agentHandler.GetSession)
+			authGroup.PUT("/agent/sessions/:session_id/archive", agentHandler.ArchiveSession)
+			authGroup.DELETE("/agent/sessions/:session_id", agentHandler.DeleteSession)
+			authGroup.GET("/agent/sessions/:session_id/projects", agentHandler.ListSessionProjects)
+			authGroup.POST("/agent/sessions/:session_id/projects", agentHandler.AttachProject)
+			authGroup.DELETE("/agent/sessions/:session_id/projects/:project_id", agentHandler.DetachProject)
+			authGroup.GET("/agent/sessions/:session_id/capabilities", agentHandler.ListSessionCapabilities)
+			authGroup.GET("/agent/sessions/:session_id/messages", agentHandler.ListMessages)
+			authGroup.POST("/agent/sessions/:session_id/messages", agentHandler.SendMessage)
+
 			authGroup.POST("/invites/accept", acceptInviteHandler)
 
 			// SuperAdmin 管理接口
@@ -111,6 +132,10 @@ func RegisterRoutes(r *gin.Engine, logger *zap.Logger, pool *datastore.Pool, tm 
 				adminGroup.POST("/plans/:plan_id/pricing", adminHandler.createPricing)
 				adminGroup.PUT("/plans/:plan_id/pricing/:pricing_id", adminHandler.updatePricing)
 				adminGroup.DELETE("/plans/:plan_id/pricing/:pricing_id", adminHandler.deletePricing)
+
+				// God 配置（SuperAdmin only）
+				adminGroup.GET("/agent/god/config", agentHandler.GetGodConfig)
+				adminGroup.PUT("/agent/god/config", agentHandler.UpdateGodConfig)
 			}
 
 			// 租户相关（可在无 X-Tenant-ID 时创建/列出）

@@ -34,6 +34,56 @@ interface Subscription {
   status: string
 }
 
+const planFeatureCatalog: Record<string, { tagline: string; features: string[]; highlight?: string }> = {
+  'free trial': {
+    tagline: 'Explore the terminal with a lightweight personal workspace.',
+    features: [
+      '1 active workspace for evaluation',
+      'Basic Agent Playground conversations',
+      'Public/system project browsing',
+      'Community-level support',
+    ],
+  },
+  basic: {
+    tagline: 'Run real team workflows with project context and shared data sources.',
+    features: [
+      'Team workspace and member collaboration',
+      'Project data sources and capability management',
+      'LLM profile configuration for agents',
+      'Standard support for operational rollout',
+    ],
+    highlight: 'Recommended',
+  },
+  advanced: {
+    tagline: 'Scale agent operations with enterprise data, governance, and support.',
+    features: [
+      'Advanced Agent workflows and premium capabilities',
+      'Larger project and integration capacity',
+      'Tenant governance for production teams',
+      'Priority support for enterprise deployment',
+    ],
+  },
+}
+
+function getPlanPresentation(plan: Plan) {
+  const key = plan.name.toLowerCase()
+  return (
+    planFeatureCatalog[key] || {
+      tagline: plan.description || 'A flexible plan for T2 Travel Terminal.',
+      features: [
+        'Agent workspace access',
+        'Project context management',
+        'Subscription-based team access',
+        'T2 platform updates',
+      ],
+    }
+  )
+}
+
+function formatPrice(pricing: Pricing) {
+  return `${pricing.price} ${pricing.currency}`
+}
+
 export function PlansPage() {
   const queryClient = useQueryClient()
   const { currentTenant, setCurrentTenant } = useTenantStore()
@@ -78,8 +128,6 @@ export function PlansPage() {
     }
   }, [plans, selectedPlanId])
 
-  const selectedPlan = plans?.find((p) => p.id === selectedPlanId)
-
   const createMutation = useMutation({
     mutationFn: (payload: {
       plan_id: string
@@ -91,12 +139,13 @@ export function PlansPage() {
     },
   })
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedPlanId || !selectedPricingId) return
+  const handleSubscribe = (plan: Plan, pricingID: string) => {
+    if (!pricingID) return
+    setSelectedPlanId(plan.id)
+    setSelectedPricingId(pricingID)
     createMutation.mutate({
-      plan_id: selectedPlanId,
-      pricing_id: selectedPricingId,
+      plan_id: plan.id,
+      pricing_id: pricingID,
       auto_renew: false,
     })
   }
@@ -123,7 +172,7 @@ export function PlansPage() {
 
   if (!hasSubscription) {
     return (
-      <div className="mx-auto max-w-2xl space-y-8 py-8">
+      <div className="mx-auto max-w-6xl space-y-8 py-8">
         <div className="text-center">
           <h1 className="font-mono text-3xl font-bold tracking-tight text-obsidian-text-primary">
             Choose a Plan
@@ -133,75 +182,95 @@ export function PlansPage() {
           </p>
         </div>
 
-        <section className="border border-obsidian-accent bg-obsidian-surface p-8">
-          <h2 className="mb-6 border-b border-obsidian-border-dim pb-2 font-mono text-xs font-semibold uppercase tracking-wider text-obsidian-accent">
-            Create Subscription
-          </h2>
-          <form onSubmit={handleCreate} className="space-y-6">
-            <div>
-              <label className="mb-1 block font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
-                Plan
-              </label>
-              <select
-                value={selectedPlanId}
-                onChange={(e) => {
-                  setSelectedPlanId(e.target.value)
-                  const plan = plans?.find((p) => p.id === e.target.value)
-                  setSelectedPricingId(plan?.pricing[0]?.id || '')
-                }}
-                className="w-full border border-obsidian-border-dim bg-obsidian-base px-3 py-2 font-mono text-sm text-obsidian-text-primary outline-none transition-colors focus:border-obsidian-accent"
+        <section className="grid items-stretch gap-4 lg:grid-cols-3">
+          {plans?.map((plan) => {
+            const presentation = getPlanPresentation(plan)
+            const selectedPricingForPlan =
+              selectedPlanId === plan.id ? selectedPricingId || plan.pricing[0]?.id || '' : plan.pricing[0]?.id || ''
+            return (
+              <article
+                key={plan.id}
+                className={`flex h-full min-h-[520px] flex-col border bg-obsidian-surface p-6 transition-colors ${
+                  selectedPlanId === plan.id
+                    ? 'border-obsidian-accent'
+                    : 'border-obsidian-border-dim hover:border-obsidian-border-med'
+                }`}
               >
-                {plans?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              {selectedPlan && (
-                <p className="mt-1 font-mono text-xs text-obsidian-text-secondary">{selectedPlan.description}</p>
-              )}
-            </div>
+                <div className="min-h-[138px] border-b border-obsidian-border-dim pb-5">
+                  <div className="mb-3 flex min-h-[24px] items-center justify-between gap-3">
+                    <p className="font-mono text-xs uppercase tracking-wider text-obsidian-accent">
+                      {presentation.highlight || 'Plan'}
+                    </p>
+                    {selectedPlanId === plan.id && (
+                      <span className="border border-obsidian-accent px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-obsidian-accent">
+                        Selected
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="font-mono text-2xl font-bold text-obsidian-text-primary">{plan.name}</h2>
+                  <p className="mt-3 font-mono text-sm leading-6 text-obsidian-text-secondary">
+                    {presentation.tagline}
+                  </p>
+                </div>
 
-            <div>
-              <label className="mb-1 block font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
-                Duration
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {selectedPlan?.pricing.map((pp) => (
-                  <label
-                    key={pp.id}
-                    className={`flex cursor-pointer items-center justify-between border px-4 py-3 font-mono text-sm transition-colors ${
-                      selectedPricingId === pp.id
-                        ? 'border-obsidian-accent bg-obsidian-accent/10 text-obsidian-text-primary'
-                        : 'border-obsidian-border-dim text-obsidian-text-secondary hover:border-obsidian-border-med'
-                    }`}
+                <ul className="min-h-[176px] flex-1 space-y-3 py-5">
+                  {presentation.features.map((feature) => (
+                    <li key={feature} className="flex gap-3 font-mono text-sm leading-6 text-obsidian-text-secondary">
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 bg-obsidian-accent" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="space-y-3 border-t border-obsidian-border-dim pt-5">
+                  <p className="font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
+                    Billing duration
+                  </p>
+                  <div className="space-y-2">
+                    {plan.pricing.map((pp) => (
+                      <label
+                        key={pp.id}
+                        className={`flex cursor-pointer items-center justify-between border px-3 py-3 font-mono text-sm transition-colors ${
+                          selectedPricingForPlan === pp.id
+                            ? 'border-obsidian-accent bg-obsidian-accent/10 text-obsidian-text-primary'
+                            : 'border-obsidian-border-dim text-obsidian-text-secondary hover:border-obsidian-border-med'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`pricing-${plan.id}`}
+                            checked={selectedPricingForPlan === pp.id}
+                            onChange={() => {
+                              setSelectedPlanId(plan.id)
+                              setSelectedPricingId(pp.id)
+                            }}
+                            className="accent-obsidian-accent"
+                          />
+                          {pp.duration_months} months
+                        </span>
+                        <span className="text-obsidian-text-primary">{formatPrice(pp)}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSubscribe(plan, selectedPricingForPlan)}
+                    disabled={createMutation.isPending || !selectedPricingForPlan}
+                    className="w-full border border-obsidian-accent bg-obsidian-accent px-4 py-3 font-mono text-sm font-semibold text-white transition-colors hover:bg-obsidian-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <span className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="pricing"
-                        checked={selectedPricingId === pp.id}
-                        onChange={() => setSelectedPricingId(pp.id)}
-                        className="accent-obsidian-accent"
-                      />
-                      {pp.duration_months} months
-                    </span>
-                    <span className="text-obsidian-text-primary">
-                      {pp.price} {pp.currency}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
+                    {createMutation.isPending && selectedPlanId === plan.id
+                      ? 'Subscribing...'
+                      : `Choose ${plan.name}`}
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </section>
 
-            <button
-              type="submit"
-              disabled={createMutation.isPending || !selectedPricingId}
-              className="w-full border border-obsidian-accent bg-obsidian-accent px-4 py-3 font-mono text-sm font-semibold text-white transition-colors hover:bg-obsidian-accent/90 disabled:opacity-50"
-            >
-              {createMutation.isPending ? 'Subscribing...' : 'Subscribe & Continue'}
-            </button>
-          </form>
+        <section>
           {createMutation.isError && (
             <p className="mt-4 font-mono text-xs text-obsidian-negative">
               {(createMutation.error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
@@ -250,49 +319,64 @@ export function PlansPage() {
         <h2 className="mb-4 border-b border-obsidian-border-dim pb-2 font-mono text-xs font-semibold uppercase tracking-wider text-obsidian-accent">
           Subscribe to T2
         </h2>
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <select
-              value={selectedPlanId}
-              onChange={(e) => {
-                setSelectedPlanId(e.target.value)
-                const plan = plans?.find((p) => p.id === e.target.value)
-                setSelectedPricingId(plan?.pricing[0]?.id || '')
-              }}
-              className="w-full border border-obsidian-border-dim bg-obsidian-base px-3 py-2 font-mono text-sm text-obsidian-text-primary outline-none transition-colors focus:border-obsidian-accent"
-            >
-              {plans?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedPricingId}
-              onChange={(e) => setSelectedPricingId(e.target.value)}
-              className="w-full border border-obsidian-border-dim bg-obsidian-base px-3 py-2 font-mono text-sm text-obsidian-text-primary outline-none transition-colors focus:border-obsidian-accent"
-            >
-              {selectedPlan?.pricing.map((pp) => (
-                <option key={pp.id} value={pp.id}>
-                  {pp.duration_months} months · {pp.price} {pp.currency}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedPlan && (
-            <p className="font-mono text-xs text-obsidian-text-secondary">{selectedPlan.description}</p>
-          )}
-
-          <button
-            type="submit"
-            disabled={createMutation.isPending || !selectedPricingId}
-            className="w-full border border-obsidian-accent bg-obsidian-accent/10 px-4 py-2 font-mono text-sm text-obsidian-accent transition-colors hover:bg-obsidian-accent hover:text-white disabled:opacity-50"
-          >
-            Subscribe
-          </button>
-        </form>
+        <div className="grid items-stretch gap-4 lg:grid-cols-3">
+          {plans?.map((plan) => {
+            const presentation = getPlanPresentation(plan)
+            const pricingID =
+              selectedPlanId === plan.id ? selectedPricingId || plan.pricing[0]?.id || '' : plan.pricing[0]?.id || ''
+            return (
+              <article
+                key={plan.id}
+                className="flex h-full min-h-[430px] flex-col border border-obsidian-border-dim bg-obsidian-base p-5"
+              >
+                <div className="min-h-[112px]">
+                  <p className="font-mono text-xs uppercase tracking-wider text-obsidian-accent">
+                    {presentation.highlight || 'Plan'}
+                  </p>
+                  <h3 className="mt-2 font-mono text-xl font-bold text-obsidian-text-primary">{plan.name}</h3>
+                  <p className="mt-2 font-mono text-xs leading-5 text-obsidian-text-secondary">
+                    {presentation.tagline}
+                  </p>
+                </div>
+                <div className="flex-1 space-y-2 py-4">
+                  {plan.pricing.map((pp) => (
+                    <label
+                      key={pp.id}
+                      className={`flex cursor-pointer items-center justify-between border px-3 py-2 font-mono text-xs ${
+                        pricingID === pp.id
+                          ? 'border-obsidian-accent bg-obsidian-accent/10 text-obsidian-text-primary'
+                          : 'border-obsidian-border-dim text-obsidian-text-secondary'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`existing-pricing-${plan.id}`}
+                          checked={pricingID === pp.id}
+                          onChange={() => {
+                            setSelectedPlanId(plan.id)
+                            setSelectedPricingId(pp.id)
+                          }}
+                          className="accent-obsidian-accent"
+                        />
+                        {pp.duration_months} months
+                      </span>
+                      <span>{formatPrice(pp)}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe(plan, pricingID)}
+                  disabled={createMutation.isPending || !pricingID}
+                  className="w-full border border-obsidian-accent bg-obsidian-accent/10 px-4 py-2 font-mono text-sm text-obsidian-accent transition-colors hover:bg-obsidian-accent hover:text-white disabled:opacity-50"
+                >
+                  Subscribe
+                </button>
+              </article>
+            )
+          })}
+        </div>
         {createMutation.isError && (
           <p className="mt-2 font-mono text-xs text-obsidian-negative">
             {(createMutation.error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
