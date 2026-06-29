@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -246,10 +245,4 @@ func getString(m map[string]interface{}, key, defaultValue string) string {
 		return v
 	}
 	return defaultValue
-}
-
-// toJSON 将结果序列化为 JSON 字符串，便于放入 Message.ToolResult。
-func toJSON(v interface{}) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }

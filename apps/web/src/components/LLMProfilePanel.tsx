@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { AxiosError } from 'axios'
 import { api } from '../lib/api'
 import {
   emptyLLMProfileForm,
@@ -22,6 +23,11 @@ function statusClasses(status: LLMProfile['status']) {
   return status === 'active'
     ? 'border-obsidian-positive-dim bg-obsidian-positive-dim/20 text-obsidian-positive'
     : 'border-obsidian-warning/40 bg-obsidian-warning/10 text-obsidian-warning'
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  const axiosError = err as AxiosError<{ error?: string }>
+  return axiosError.response?.data?.error || (err instanceof Error ? err.message : fallback)
 }
 
 function LLMProfileDrawer({
@@ -262,8 +268,8 @@ export function LLMProfilePanel({ onChanged }: LLMProfilePanelProps) {
       queryClient.invalidateQueries({ queryKey: ['llm-profiles'] })
       onChanged?.()
     },
-    onError: (err: any) => {
-      setFormError(err.response?.data?.error || err.message || 'Failed to save LLM profile')
+    onError: (err: unknown) => {
+      setFormError(errorMessage(err, 'Failed to save LLM profile'))
     },
   })
 
@@ -323,8 +329,8 @@ export function LLMProfilePanel({ onChanged }: LLMProfilePanelProps) {
         models: models.join('\n'),
         default_model: current.default_model || models[0],
       }))
-    } catch (err: any) {
-      setFetchError(err.response?.data?.error || err.message || 'Failed to fetch models')
+    } catch (err: unknown) {
+      setFetchError(errorMessage(err, 'Failed to fetch models'))
     } finally {
       setIsFetchingModels(false)
     }

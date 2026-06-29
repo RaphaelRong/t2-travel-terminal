@@ -37,11 +37,11 @@ func (p *AnthropicProvider) Name() string {
 }
 
 type anthropicChatRequest struct {
-	Model     string              `json:"model"`
-	MaxTokens int                 `json:"max_tokens"`
-	Messages  []anthropicMessage  `json:"messages"`
-	Tools     []anthropicTool     `json:"tools,omitempty"`
-	System    string              `json:"system,omitempty"`
+	Model     string             `json:"model"`
+	MaxTokens int                `json:"max_tokens"`
+	Messages  []anthropicMessage `json:"messages"`
+	Tools     []anthropicTool    `json:"tools,omitempty"`
+	System    string             `json:"system,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -57,10 +57,10 @@ type anthropicTool struct {
 
 type anthropicChatResponse struct {
 	Content []struct {
-		Type  string `json:"type"`
-		Text  string `json:"text,omitempty"`
-		ID    string `json:"id,omitempty"`
-		Name  string `json:"name,omitempty"`
+		Type  string         `json:"type"`
+		Text  string         `json:"text,omitempty"`
+		ID    string         `json:"id,omitempty"`
+		Name  string         `json:"name,omitempty"`
 		Input map[string]any `json:"input,omitempty"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
@@ -160,9 +160,10 @@ func (p *AnthropicProvider) Chat(ctx context.Context, model string, messages []M
 	}
 
 	finishReason := FinishReasonStop
-	if decoded.StopReason == "tool_use" {
+	switch decoded.StopReason {
+	case "tool_use":
 		finishReason = FinishReasonToolCalls
-	} else if decoded.StopReason == "max_tokens" {
+	case "max_tokens":
 		finishReason = FinishReasonLength
 	}
 
