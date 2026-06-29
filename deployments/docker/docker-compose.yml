@@ -1,4 +1,20 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: t2_db
+    volumes:
+      - t2-db-data:/var/lib/postgresql/data
+    networks:
+      - t2-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   server:
     build:
       context: ../..
@@ -10,6 +26,10 @@ services:
     environment:
       - SERVER_ADDR=:8080
       - LOG_LEVEL=info
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/t2_db?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - t2-network
 
@@ -23,6 +43,9 @@ services:
       - server
     networks:
       - t2-network
+
+volumes:
+  t2-db-data:
 
 networks:
   t2-network:

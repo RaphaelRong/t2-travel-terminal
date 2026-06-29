@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/agent/store"
@@ -31,6 +32,9 @@ func (l *ProjectLoader) LoadTools(ctx context.Context, q store.Querier, sessionI
 
 	result := make([]tools.Tool, 0, len(caps))
 	for i, cap := range caps {
+		if cap == nil || strings.TrimSpace(cap.Name) == "" {
+			continue
+		}
 		project := projects[i]
 		integration := integrations[i]
 		result = append(result, l.adapter.Adapt(cap, project, integration))

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { getToken, type UserRole } from '../lib/auth'
 import { type LLMProfile } from '../lib/llmProfiles'
@@ -17,6 +17,11 @@ interface AgentSession {
   status: string
   created_at: string
   updated_at: string
+}
+
+interface SessionProject {
+  project_id: string
+  name: string
 }
 
 interface AgentMessage {
@@ -168,7 +173,7 @@ export function PlaygroundPage() {
     },
   })
 
-  const { data: subscriptions = [], isLoading: subscriptionsLoading } = useQuery({
+  const { data: subscriptions = [] } = useQuery({
     queryKey: ['subscriptions'],
     queryFn: async () => {
       const res = await api.get<{ subscriptions: Subscription[] }>('/tenants')
@@ -234,11 +239,40 @@ export function PlaygroundPage() {
     ])
   }
 
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/agent/sessions/${id}`)
+    },
+    onSuccess: () => {
+      void refetchSessions()
+      if (sessionId === deletingSessionId) {
+        setSessionId(null)
+        resetConversation()
+      }
+    },
+  })
+
+  const handleDeleteSession = (session: AgentSession) => {
+    if (window.confirm(`是否删除 ${session.title || 'Untitled session'}？此操作不可恢复。`)) {
+      setDeletingSessionId(session.id)
+      deleteSessionMutation.mutate(session.id, {
+        onSettled: () => setDeletingSessionId(null),
+      })
+    }
+  }
+
   const selectSession = async (id: string) => {
     if (isStreaming) return
     setSessionId(id)
-    const res = await api.get<{ messages: AgentMessage[] }>(`/agent/sessions/${id}/messages`)
-    const loaded = res.data.messages
+    const [messageRes, projectRes] = await Promise.all([
+      api.get<{ messages: AgentMessage[] }>(`/agent/sessions/${id}/messages`),
+      api.get<{ projects: SessionProject[] }>(`/agent/sessions/${id}/projects`),
+    ])
+    const attachedProject = projectRes.data.projects[0]
+    setSelectedProjectId(attachedProject?.project_id || '')
+    const loaded = messageRes.data.messages
       .filter((message) => message.role !== 'system')
       .reduce<ChatMessage[]>((items, message) => {
         const role = message.role as ChatRole
@@ -271,8 +305,18 @@ export function PlaygroundPage() {
     )
   }
 
+  const ensureSessionProject = async (id: string) => {
+    if (!selectedProject) return
+    await api.post(`/agent/sessions/${id}/projects`, {
+      project_id: selectedProject.id,
+    })
+  }
+
   const ensureSession = async (firstMessage: string): Promise<string> => {
-    if (sessionId) return sessionId
+    if (sessionId) {
+      await ensureSessionProject(sessionId)
+      return sessionId
+    }
     const res = await api.post<{ session: { id: string } }>('/agent/sessions', {
       title: sessionTitleFromPrompt(firstMessage, selectedProject?.name),
       project_ids: selectedProject ? [selectedProject.id] : [],
@@ -405,17 +449,91 @@ export function PlaygroundPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="font-mono text-2xl font-bold tracking-tight text-obsidian-text-primary">
-          <span className="text-obsidian-accent">&gt;</span> Playground
-        </h1>
-        <p className="mt-1 font-mono text-sm text-obsidian-text-secondary">
-          Test chat requests against a selected LLM profile, model, and project context.
-        </p>
+    <div className="flex h-[calc(100vh-120px)] min-h-[620px] flex-col gap-4">
+      <header className="flex flex-col gap-3 border border-obsidian-border-dim bg-obsidian-surface p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="font-mono text-2xl font-bold tracking-tight text-obsidian-text-primary">
+            <span className="text-obsidian-accent">&gt;</span> Playground
+          </h1>
+          <p className="mt-1 font-mono text-sm text-obsidian-text-secondary">
+            Test chat requests against a selected LLM profile, model, and project context.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedProject?.id || ''}
+            onChange={(e) => resetConversation(e.target.value)}
+            disabled={!currentTenant || projectsLoading || isStreaming}
+            className="max-w-[180px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1.5 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
+            title="Project"
+          >
+            <option value="">No project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.source_scope === 'system' ? '[System] ' : ''}
+                {project.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value=""
+            onChange={() => {}}
+            disabled={!selectedProject || isStreaming}
+            className="max-w-[160px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1.5 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
+            title="Capabilities"
+          >
+            <option value="">
+              {selectedProject
+                ? `${(selectedProject.capabilities || []).filter((c) => (c.status || 'active') === 'active').length} capabilities`
+                : 'Capabilities'}
+            </option>
+            {selectedProject?.capabilities?.map((capability) => (
+              <option key={capability.id || capability.name} value={capability.id || capability.name} disabled>
+                {capability.name} ({capability.status || 'active'})
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedProfile?.id || ''}
+            onChange={(e) => {
+              setSelectedProfileId(e.target.value)
+              setSelectedModel('')
+            }}
+            disabled={activeProfiles.length === 0 || isStreaming}
+            className="max-w-[160px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1.5 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
+            title="LLM profile"
+          >
+            {activeProfiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.display_name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={currentModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            disabled={!selectedProfile || modelOptions.length === 0 || isStreaming}
+            className="max-w-[180px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1.5 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
+            title="Model"
+          >
+            {modelOptions.length === 0 ? (
+              <option value="">No models</option>
+            ) : (
+              modelOptions.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
       </header>
 
-      <section className="grid h-[calc(100vh-180px)] min-h-[620px] gap-4 overflow-hidden lg:grid-cols-[320px_1fr]">
+      <section className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[360px_1fr]">
         <aside className="min-h-0 space-y-4 overflow-y-auto border border-obsidian-border-dim bg-obsidian-surface p-4">
           <button
             type="button"
@@ -435,77 +553,45 @@ export function PlaygroundPage() {
                 {sessionsLoading ? 'Loading' : `${sessions.length}`}
               </span>
             </div>
-            <div className="max-h-56 space-y-2 overflow-y-auto">
+            <div className="space-y-2">
               {sessions.length === 0 ? (
                 <p className="border border-obsidian-border-dim bg-obsidian-base px-3 py-3 font-mono text-xs leading-5 text-obsidian-text-secondary">
                   No active sessions yet.
                 </p>
               ) : (
                 sessions.map((session) => (
-                  <button
+                  <div
                     key={session.id}
-                    type="button"
-                    onClick={() => void selectSession(session.id)}
-                    disabled={isStreaming}
-                    className={`w-full border px-3 py-2 text-left font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    className={`group flex items-start gap-2 border px-3 py-2 font-mono transition-colors ${
                       sessionId === session.id
                         ? 'border-obsidian-accent bg-obsidian-accent/10 text-obsidian-accent'
                         : 'border-obsidian-border-dim bg-obsidian-base text-obsidian-text-primary hover:border-obsidian-accent'
                     }`}
                   >
-                    <span className="block truncate text-sm">{session.title || 'Untitled session'}</span>
-                    <span className="mt-1 block text-[10px] uppercase tracking-wide text-obsidian-text-tertiary">
-                      {session.id.slice(0, 8)} · {new Date(session.updated_at).toLocaleDateString()}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => void selectSession(session.id)}
+                      disabled={isStreaming}
+                      className="min-w-0 flex-1 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="block truncate text-sm">{session.title || 'Untitled session'}</span>
+                      <span className="mt-1 block text-[10px] uppercase tracking-wide text-obsidian-text-tertiary">
+                        {session.id.slice(0, 8)} · {new Date(session.updated_at).toLocaleDateString()}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(session)}
+                      disabled={isStreaming || deleteSessionMutation.isPending}
+                      className="shrink-0 border border-obsidian-negative-dim bg-obsidian-negative-dim/10 px-2 py-1 font-mono text-[10px] uppercase text-obsidian-negative opacity-0 transition-opacity hover:bg-obsidian-negative hover:text-white group-hover:opacity-100 disabled:opacity-50"
+                      title="Delete session"
+                    >
+                      Del
+                    </button>
+                  </div>
                 ))
               )}
             </div>
-          </div>
-
-          <div>
-            <label className="mb-2 block font-mono text-xs uppercase tracking-wide text-obsidian-text-secondary">
-              Projects
-            </label>
-            <div className="max-h-72 space-y-2 overflow-y-auto">
-              {subscriptionsLoading && !currentTenant ? (
-                <p className="border border-obsidian-border-dim bg-obsidian-base px-3 py-3 font-mono text-xs leading-5 text-obsidian-text-secondary">
-                  Loading workspace...
-                </p>
-              ) : (
-                projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  onClick={() => resetConversation(project.id)}
-                  disabled={!currentTenant || projectsLoading || isStreaming}
-                  className={`w-full border px-3 py-2 text-left font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    selectedProject?.id === project.id
-                      ? 'border-obsidian-accent bg-obsidian-accent/10 text-obsidian-accent'
-                      : 'border-obsidian-border-dim bg-obsidian-base text-obsidian-text-primary hover:border-obsidian-accent'
-                  }`}
-                >
-                  <span className="block truncate text-sm">
-                    {project.source_scope === 'system' ? '[System] ' : ''}
-                    {project.name}
-                  </span>
-                  <span className="mt-1 block truncate text-[10px] uppercase tracking-wide text-obsidian-text-tertiary">
-                    {project.source_type} · {project.status}
-                  </span>
-                </button>
-                ))
-              )}
-              {currentTenant && !projectsLoading && projects.length === 0 && (
-                <p className="border border-obsidian-border-dim bg-obsidian-base px-3 py-3 font-mono text-xs leading-5 text-obsidian-text-secondary">
-                  No projects available.
-                </p>
-              )}
-            </div>
-            {!currentTenant && (
-              <p className="mt-2 font-mono text-xs leading-5 text-obsidian-text-secondary">
-                Select or create a plan before using project context.
-              </p>
-            )}
           </div>
 
           {!profilesLoading && activeProfiles.length === 0 && (
@@ -559,50 +645,15 @@ export function PlaygroundPage() {
               className="w-full resize-none border border-obsidian-border-dim bg-obsidian-base px-3 py-2 font-mono text-sm leading-6 text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
             />
             <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                <select
-                  value={selectedProfile?.id || ''}
-                  onChange={(e) => {
-                    setSelectedProfileId(e.target.value)
-                    setSelectedModel('')
-                  }}
-                  disabled={activeProfiles.length === 0 || isStreaming}
-                  className="max-w-[180px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
-                  title="LLM profile"
-                >
-                  {activeProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.display_name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={currentModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  disabled={!selectedProfile || modelOptions.length === 0 || isStreaming}
-                  className="max-w-[220px] border border-obsidian-border-dim bg-obsidian-base px-2 py-1 font-mono text-xs text-obsidian-text-primary outline-none focus:border-obsidian-accent disabled:opacity-50"
-                  title="Model"
-                >
-                  {modelOptions.length === 0 ? (
-                    <option value="">No models</option>
-                  ) : (
-                    modelOptions.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <span className="min-w-[160px] truncate font-mono text-xs text-obsidian-text-secondary">
-                  {isStreaming
-                    ? 'Agent is thinking...'
-                    : canSend
-                    ? sessionId
-                      ? `Session ${sessionId.slice(0, 8)}`
-                      : selectedProject?.name || 'Ready'
-                    : 'Choose a profile and model.'}
-                </span>
-              </div>
+              <span className="min-w-[160px] truncate font-mono text-xs text-obsidian-text-secondary">
+                {isStreaming
+                  ? 'Agent is thinking...'
+                  : canSend
+                  ? sessionId
+                    ? `Session ${sessionId.slice(0, 8)}`
+                    : selectedProject?.name || 'Ready'
+                  : 'Choose a profile and model.'}
+              </span>
               <button
                 type="submit"
                 disabled={!canSend}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/t2-travel-terminal/t2-travel-terminal/internal/agent/domain"
@@ -108,15 +110,24 @@ func (r *Runner) Run(ctx context.Context, q store.Querier, req RunRequest, strea
 		r.emit(stream, StreamEventError, map[string]interface{}{"error": fmt.Sprintf("load project tools: %v", err)})
 		return nil, fmt.Errorf("load project tools: %w", err)
 	}
+	registeredToolNames := make([]string, 0, len(projectTools))
 	for _, pt := range projectTools {
 		if err := registry.Register(pt); err != nil {
 			// 被 GodScope 禁止或其他原因注册失败时，记录但继续
 			r.emit(stream, StreamEventError, map[string]interface{}{"error": fmt.Sprintf("register project tool %s: %v", pt.Name(), err)})
+			continue
 		}
+		registeredToolNames = append(registeredToolNames, pt.Name())
 	}
+	r.emit(stream, StreamEventProjectToolsLoaded, map[string]interface{}{
+		"count":            len(registeredToolNames),
+		"tool_names":       registeredToolNames,
+		"total_loaded":     len(projectTools),
+		"tool_definitions": registry.ToLLMDefinitions(),
+	})
 
 	// 4. 构建 LLM messages，注入 system prompt
-	llmMessages := r.buildLLMMessages(req.GodScope, req.Soul, req.Messages)
+	llmMessages := r.buildLLMMessages(req.GodScope, req.Soul, req.Messages, projectTools)
 
 	// 5. 主循环
 	var assistantMsg *domain.Message
@@ -195,21 +206,59 @@ func (r *Runner) Run(ctx context.Context, q store.Querier, req RunRequest, strea
 	}, nil
 }
 
-func (r *Runner) buildLLMMessages(scope *domain.GodScope, soul *domain.Soul, history []*domain.Message) []llm.Message {
+func (r *Runner) buildLLMMessages(scope *domain.GodScope, soul *domain.Soul, history []*domain.Message, projectTools []tools.Tool) []llm.Message {
 	llmMessages := make([]llm.Message, 0, len(history)+1)
 
+	// 合并多个 system prompt 为一条 system message。部分 LLM 兼容接口（如 Zhipu）要求
+	// messages 中只能有一条 system 角色，且位于开头。
+	var systemParts []string
 	systemPrompt := god.BuildSystemPrompt(scope, soul)
 	if systemPrompt != "" {
+		systemParts = append(systemParts, systemPrompt)
+	}
+	if toolContext := buildProjectToolContext(projectTools); toolContext != "" {
+		systemParts = append(systemParts, toolContext)
+	}
+	if len(systemParts) > 0 {
 		llmMessages = append(llmMessages, llm.Message{
 			Role:    llm.RoleSystem,
-			Content: systemPrompt,
+			Content: strings.Join(systemParts, "\n\n"),
 		})
 	}
 
 	for _, m := range history {
+		// history 中可能包含创建 session 时写入的 system message，避免重复 system 角色。
+		if m.Role == domain.MessageRoleSystem {
+			continue
+		}
 		llmMessages = append(llmMessages, llm.FromDomainMessage(m))
 	}
 	return llmMessages
+}
+
+func buildProjectToolContext(projectTools []tools.Tool) string {
+	if len(projectTools) == 0 {
+		return ""
+	}
+
+	sorted := append([]tools.Tool(nil), projectTools...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name() < sorted[j].Name()
+	})
+
+	var b strings.Builder
+	b.WriteString("Project capabilities available in this session:\n")
+	for _, tool := range sorted {
+		b.WriteString("- ")
+		b.WriteString(tool.Name())
+		if description := strings.TrimSpace(tool.Description()); description != "" {
+			b.WriteString(": ")
+			b.WriteString(description)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("When the user asks about the selected Project, connected integrations, live APIs, MCP tools, or capability-specific data, consider these Project capabilities and call the relevant tool instead of guessing.")
+	return b.String()
 }
 
 func (r *Runner) executeToolCalls(ctx context.Context, q store.Querier, registry *tools.Registry, run *domain.AgentRun, calls []domain.ToolCall, stream chan<- StreamEvent) []*domain.Message {

@@ -241,6 +241,7 @@ const (
 		JOIN projects p ON p.id = c.project_id
 		LEFT JOIN project_integrations i ON i.id = c.integration_id
 		WHERE asp.session_id = $1
+		  AND c.status = 'active'
 		ORDER BY c.name
 	`
 

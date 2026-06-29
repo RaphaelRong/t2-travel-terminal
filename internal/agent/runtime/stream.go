@@ -12,6 +12,8 @@ const (
 	StreamEventDone StreamEventType = "done"
 	// StreamEventError 表示运行过程中出现错误。
 	StreamEventError StreamEventType = "error"
+	// StreamEventProjectToolsLoaded 表示已加载会话关联的 Project 工具。
+	StreamEventProjectToolsLoaded StreamEventType = "project_tools_loaded"
 )
 
 // StreamEvent 是 SSE 推送的事件结构。

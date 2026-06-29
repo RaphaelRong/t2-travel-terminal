@@ -129,7 +129,8 @@ func (p *AnthropicProvider) Chat(ctx context.Context, model string, messages []M
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("LLM returned HTTP %d: %s", resp.StatusCode, string(body))
+		toolsJSON, _ := json.Marshal(reqBody.Tools)
+		return nil, fmt.Errorf("LLM returned HTTP %d: %s\ntools: %s\nrequest: %s", resp.StatusCode, string(body), string(toolsJSON), truncatePayload(payload, 2048))
 	}
 
 	var decoded anthropicChatResponse

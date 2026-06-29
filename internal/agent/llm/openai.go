@@ -127,7 +127,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, model string, messages []Mess
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("LLM returned HTTP %d: %s", resp.StatusCode, string(body))
+		toolsJSON, _ := json.Marshal(reqBody.Tools)
+		return nil, fmt.Errorf("LLM returned HTTP %d: %s\ntools: %s\nrequest: %s", resp.StatusCode, string(body), string(toolsJSON), truncatePayload(payload, 2048))
 	}
 
 	var decoded openAIChatResponse
@@ -226,4 +227,12 @@ func toolResultToString(result map[string]any) string {
 	}
 	b, _ := json.Marshal(result)
 	return string(b)
+}
+
+// truncatePayload 截断过长的请求体，用于错误信息中暴露调试内容。
+func truncatePayload(payload []byte, max int) string {
+	if len(payload) <= max {
+		return string(payload)
+	}
+	return string(payload[:max]) + "...(truncated)"
 }
